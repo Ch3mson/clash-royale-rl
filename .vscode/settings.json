@@ -1,0 +1,14 @@
+{
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.autoImportCompletions": true,
+    "python.analysis.completeFunctionParens": true,
+    "python.languageServer": "Pylance",
+    "python.analysis.diagnosticMode": "workspace",
+    "editor.quickSuggestions": {
+        "other": true,
+        "comments": false,
+        "strings": true
+    },
+    "editor.suggestOnTriggerCharacters": true,
+    "editor.tabCompletion": "on"
+}
