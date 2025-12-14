@@ -13,6 +13,7 @@ import random
 from typing import Tuple, Optional
 from controllers.adb_controller import ADBController
 from detection.grid_system import ArenaConfig, GridSystem
+import cv2
 
 
 class GameController:
@@ -148,6 +149,57 @@ class GameController:
             }
         }
 
+    def get_elixir(self) -> int:
+        """
+        Get current elixir count using fast pixel detection
+        
+        The elixir bar in Clash Royale shows 10 segments that fill with pink color.
+        We count how many segments are filled by sampling pixel colors.
+        
+        Returns:
+            int: Current elixir (0-10)
+        """
+        screenshot = self.adb.screenshot()
+        if screenshot is None:
+            return 0
+        
+        # Elixir bar region (you found this at y=1220-1257, x=202-231)
+        # We'll sample pixels along the bar to count filled segments
+        elixir_count = 0
+        
+        # Pink color in BGR format (OpenCV uses BGR, not RGB)
+        target_color = [198, 30, 193]  # Pink elixir color in BGR
+        tolerance = 50  # Allow some variation
+        
+        try:
+            # Sample 10 positions along the elixir bar (one per segment)
+            # The bar goes horizontally, so we sample x positions
+            bar_start_x = 202
+            bar_end_x = 231
+            bar_y = 1238  # Middle of the bar vertically
+            
+            # Sample 10 evenly-spaced points
+            for i in range(10):
+                # Calculate x position for this segment
+                x = bar_start_x + int((bar_end_x - bar_start_x) * (i + 0.5) / 10)
+                
+                # Get pixel color (BGR)
+                pixel = screenshot[bar_y, x]
+                
+                # Check if pixel matches elixir color (within tolerance)
+                color_match = all(
+                    abs(int(pixel[c]) - target_color[c]) <= tolerance 
+                    for c in range(3)
+                )
+                
+                if color_match:
+                    elixir_count += 1
+            
+            return elixir_count
+            
+        except Exception as e:
+            print(f"Error detecting elixir: {e}")
+            return 0
 
 # Example usage / testing
 if __name__ == "__main__":
@@ -166,13 +218,11 @@ if __name__ == "__main__":
         
         # Show grid info
         info = gc.get_grid_info()
+
+        elixir = gc.get_elixir()
+        print(f"Elixir: {elixir}")
         print(f"\nGrid: {info['rows']}x{info['cols']}")
         print(f"Cell size: {info['cell_size']['width']:.1f}x{info['cell_size']['height']:.1f} px")
-        
-        # Uncomment to test card playing (make sure you're in training mode!)
-        print("\nTesting card play in 3 seconds...")
-        print("Switch to Clash Royale and start training mode!")
-        time.sleep(3)
         gc.play_card(card_slot=0, row=24, col=9)  # Play card 0 at center-bottom
         
     except FileNotFoundError as e:
