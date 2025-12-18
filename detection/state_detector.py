@@ -24,7 +24,7 @@ class StateDetector:
         if self._check_elixir_bar_visible(screenshot):
             return GameState.IN_BATTLE
         
-        battle_button = self.image_matcher.find_template(screenshot, 'battle_button', threshold=0.6)
+        battle_button = self.image_matcher.find_template(screenshot, 'battle_button', threshold=0.5)
         if battle_button:
             return GameState.MAIN_MENU
         
@@ -37,27 +37,32 @@ class StateDetector:
     def _check_elixir_bar_visible(self, screenshot: np.ndarray) -> bool:
         """Check if elixir bar is visible (indicates in battle)"""
         try:
+            # Scale positions based on screen height
+            h = screenshot.shape[0]
+            # Elixir bar is at ~97.5% of screen height
+            bar_y = int(h * 0.975)
+
             test_positions = [
-                (67, 1255),
-                (67, 1260),
-                (200, 1255),
-                (200, 1260),
-                (350, 1255),
+                (215, bar_y),
+                (300, bar_y),
+                (400, bar_y),
+                (500, bar_y),
             ]
-            
+
             for x, y in test_positions:
                 if y >= screenshot.shape[0] or x >= screenshot.shape[1]:
                     continue
-                
+
                 pixel = screenshot[y, x]
-                is_pink = (pixel[2] > 150 and
+                # Pink elixir color: high red, low-mid green, high blue
+                is_pink = (pixel[2] > 200 and
                           pixel[1] < 150 and
-                          pixel[0] > 150)
-                
+                          pixel[0] > 200)
+
                 if is_pink:
                     return True
             return False
-        
+
         except Exception as e:
             return False
         

@@ -47,13 +47,13 @@ class GameController:
         screen_width = self.arena_config.screen_width
         screen_height = self.arena_config.screen_height
         
-        card_y = int(screen_height * 0.92)
-        
-        margin = int(screen_width * 0.15)
+        card_y = int(screen_height * 0.89)
+
+        margin = int(screen_width * 0.20)
         card_width = (screen_width - 2 * margin) / 4
-        
+
         self.card_positions = [
-            (int(margin + card_width * 0.5 + i * card_width), card_y)
+            (int(margin + card_width * 0.5 + i * card_width) + 50, card_y)
             for i in range(4)
         ]
         
@@ -233,12 +233,16 @@ class GameController:
     
     def click_battle_button(self) -> bool:
         """
-        Find and click the battle button (to start a match)
-        
+        Click the battle button at fixed position (to start a match)
+
         Returns:
             True if clicked successfully, False otherwise
         """
-        return self.click_button('battle_button.png', threshold=0.6)
+        # Battle button is at ~50% x, ~78% y of screen
+        x = int(self.arena_config.screen_width * 0.50)
+        y = int(self.arena_config.screen_height * 0.78)
+        print(f"Clicking battle button at ({x}, {y})")
+        return self.adb.click(x, y)
     
     def click_ok_button(self) -> bool:
         """
