@@ -1,6 +1,6 @@
 {
-  "instance_id": 0,
-  "adb_port": 5564,
+  "instance_id": 1,
+  "adb_port": 5556,
   "arena_config": {
     "screen_width": 720,
     "screen_height": 1280,

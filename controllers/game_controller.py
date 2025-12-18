@@ -13,6 +13,7 @@ import random
 from typing import Tuple, Optional
 from controllers.adb_controller import ADBController
 from detection.grid_system import ArenaConfig, GridSystem
+from detection.image_matcher import ImageMatcher
 import cv2
 
 
@@ -26,7 +27,6 @@ class GameController:
         """
         self.instance_id = instance_id
         
-        # Load configuration
         config_path = Path("config") / f"instance_{instance_id}.json"
         if not config_path.exists():
             raise FileNotFoundError(
@@ -40,20 +40,15 @@ class GameController:
         self.adb_port = data["adb_port"]
         self.arena_config = ArenaConfig(**data["arena_config"])
         
-        # Initialize controllers
         self.adb = ADBController(self.adb_port)
         self.grid = GridSystem(self.arena_config)
+        self.image_matcher = ImageMatcher()
         
-        # Card positions in hand (pixels) - bottom of screen
-        # These are approximate and may need calibration for your screen
-        # Format: (x, y) for each card slot (0-3, left to right)
         screen_width = self.arena_config.screen_width
         screen_height = self.arena_config.screen_height
         
-        # Cards are typically at ~92% down the screen
         card_y = int(screen_height * 0.92)
         
-        # Evenly spaced across width, with margins
         margin = int(screen_width * 0.15)
         card_width = (screen_width - 2 * margin) / 4
         
@@ -78,32 +73,25 @@ class GameController:
         Returns:
             True if action executed successfully, False otherwise
         """
-        # Validate inputs
         if card_slot not in range(4):
             print(f"❌ Invalid card slot: {card_slot} (must be 0-3)")
             return False
         
-        # Get starting position (card in hand)
         start_x, start_y = self.card_positions[card_slot]
         
-        # Convert grid position to pixel coordinates
         target_x, target_y = self.grid.grid_to_pixel(row, col)
         
-        # Add small random offset for humanization (anti-detection)
         target_x += random.randint(-3, 3)
         target_y += random.randint(-3, 3)
         
-        print(f"🎴 Playing card {card_slot}: ({start_x},{start_y}) → ({target_x},{target_y}) [Grid: {row},{col}]")
+        print(f"Playing card {card_slot}: ({start_x},{start_y}) → ({target_x},{target_y}) [Grid: {row},{col}]")
         
-        # Execute drag (swipe from card to target)
-        # Duration ~200ms feels natural
         success = self.adb.swipe(start_x, start_y, target_x, target_y, duration=200)
         
         if not success:
             print(f"❌ Swipe failed")
             return False
         
-        # Small delay to simulate human timing
         time.sleep(random.uniform(0.15, 0.35))
         
         return True
@@ -163,17 +151,12 @@ class GameController:
         if screenshot is None:
             return 0
         
-        # Elixir bar region (you found this at y=1220-1257, x=202-231)
-        # We'll sample pixels along the bar to count filled segments
         elixir_count = 0
         
-        # Pink color in BGR format (OpenCV uses BGR, not RGB)
-        target_color = [198, 30, 193]  # Pink elixir color in BGR
-        tolerance = 50  # Allow some variation
+        target_color = [198, 30, 193]
+        tolerance = 50
         
         try:
-            # Sample 10 positions along the elixir bar (one per segment)
-            # The bar goes horizontally, so we sample x positions
             bar_start_x = 202
             bar_end_x = 231
             bar_y = 1238  # Middle of the bar vertically
@@ -200,32 +183,85 @@ class GameController:
         except Exception as e:
             print(f"Error detecting elixir: {e}")
             return 0
-
-# Example usage / testing
-if __name__ == "__main__":
-    # Test the game controller
-    print("Testing GameController...")
     
-    try:
-        gc = GameController(instance_id=0)
+    def find_button(self, button_name: str, threshold: float = 0.8) -> Optional[Tuple[int, int, float]]:
+        """
+        Find a UI button in the current screen
         
-        # Test connection
-        if gc.test_connection():
-            print("✓ ADB connection working")
+        Args:
+            button_name: Button template filename (e.g., 'battle_button.png')
+            threshold: Confidence threshold (0.0-1.0)
+            
+        Returns:
+            (x, y, confidence) if found, else None
+        """
+        screenshot = self.adb.screenshot()
+        if screenshot is None:
+            return None
+        
+        return self.image_matcher.find_template(screenshot, button_name, threshold)
+    
+    def click_button(self, button_name: str, threshold: float = 0.8) -> bool:
+        """
+        Find and click a UI button
+        
+        Args:
+            button_name: Button template filename
+            threshold: Confidence threshold
+            
+        Returns:
+            True if button found and clicked, False otherwise
+        """
+        result = self.find_button(button_name, threshold)
+        
+        if result:
+            x, y, confidence = result
+            print(f"Found {button_name} at ({x}, {y}) [confidence: {confidence:.2f}]")
+            
+            x += random.randint(-2, 2) # avoid bot detection with random
+            y += random.randint(-2, 2)
+            
+            time.sleep(random.uniform(0.1, 0.2))
+            
+            success = self.adb.click(x, y)
+            if success:
+                time.sleep(random.uniform(0.3, 0.5))
+            return success
         else:
-            print("✗ ADB connection failed")
-            exit(1)
+            print(f"❌ {button_name} not found")
+            return False
+    
+    def click_battle_button(self) -> bool:
+        """
+        Find and click the battle button (to start a match)
         
-        # Show grid info
-        info = gc.get_grid_info()
-
-        elixir = gc.get_elixir()
-        print(f"Elixir: {elixir}")
-        print(f"\nGrid: {info['rows']}x{info['cols']}")
-        print(f"Cell size: {info['cell_size']['width']:.1f}x{info['cell_size']['height']:.1f} px")
-        gc.play_card(card_slot=0, row=24, col=9)  # Play card 0 at center-bottom
+        Returns:
+            True if clicked successfully, False otherwise
+        """
+        return self.click_button('battle_button.png', threshold=0.6)
+    
+    def click_ok_button(self) -> bool:
+        """
+        Find and click the OK button (after battle ends)
         
-    except FileNotFoundError as e:
-        print(f"✗ {e}")
-    except Exception as e:
-        print(f"✗ Error: {e}")
+        Returns:
+            True if clicked successfully, False otherwise
+        """
+        return self.click_button('ok_button.png', threshold=0.6)
+    
+    def visualize_button(self, button_name: str, output_path: str = "button_debug.png") -> bool:
+        """
+        Visualize button detection (for debugging/calibration)
+        
+        Args:
+            button_name: Button template filename
+            output_path: Where to save visualization
+            
+        Returns:
+            True if visualization saved, False otherwise
+        """
+        screenshot = self.adb.screenshot()
+        if screenshot is None:
+            return False
+        
+        return self.image_matcher.visualize_match(screenshot, button_name, 0.8, output_path)
