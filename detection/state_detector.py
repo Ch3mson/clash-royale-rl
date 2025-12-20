@@ -79,7 +79,7 @@ if __name__ == "__main__":
     print("Make sure BlueStacks is running and Clash Royale is open!\n")
     
     # Initialize components
-    adb = ADBController(adb_port=5554)
+    adb = ADBController(adb_port=5555)
     matcher = ImageMatcher()
     detector = StateDetector(matcher)
     

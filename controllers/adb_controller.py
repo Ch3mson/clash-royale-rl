@@ -7,10 +7,10 @@ from typing import Optional, Tuple
 class ADBController:
     def __init__(self, adb_port: int):
         self.adb_port = adb_port
-        self.device_serial = f"emulator-{self.adb_port}"
-    
+        self.device_serial = f"127.0.0.1:{self.adb_port}"
+
     def _run_adb_command(self, command: str, binary_output: bool = False) -> subprocess.CompletedProcess:
-        full_command = f'HD-Adb -s {self.device_serial} {command}'
+        full_command = f'adb -s {self.device_serial} {command}'
         return subprocess.run(
             full_command,
             shell=True,
