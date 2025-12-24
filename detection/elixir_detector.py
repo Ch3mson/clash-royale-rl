@@ -90,6 +90,10 @@ class ElixirDetector:
         if len(region.shape) == 3:
             region = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
 
+        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to enhance contrast
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(2, 2))
+        region = clahe.apply(region)
+
         # Find best matching template (try all variants)
         best_match = None
         best_confidence = 0.0
@@ -103,8 +107,11 @@ class ElixirDetector:
                 else:
                     template_resized = template
 
+                # Apply same CLAHE enhancement to template
+                template_enhanced = clahe.apply(template_resized)
+
                 # Perform template matching
-                result = cv2.matchTemplate(region, template_resized, cv2.TM_CCOEFF_NORMED)
+                result = cv2.matchTemplate(region, template_enhanced, cv2.TM_CCOEFF_NORMED)
                 max_val = result.max()
 
                 if max_val > best_confidence:
