@@ -18,7 +18,6 @@ class GameState(Enum):
 class StateDetector:
     def __init__(self, image_matcher: ImageMatcher):
         self.image_matcher = image_matcher
-        self.elixir_regions = (202, 1220, 231, 1257)
 
     def detect_state(self, screenshot: np.ndarray) -> GameState:
         if self._check_elixir_bar_visible(screenshot):
@@ -58,18 +57,12 @@ class StateDetector:
                     return True
             return False
         
-        except Exception as e:
+        except Exception:
             return False
         
 if __name__ == "__main__":
-    import sys
-    from pathlib import Path
     import cv2
-    
-    # Add project root to path
-    project_root = Path(__file__).parent.parent
-    sys.path.insert(0, str(project_root))
-    
+
     from controllers.adb_controller import ADBController
     from detection.image_matcher import ImageMatcher
     

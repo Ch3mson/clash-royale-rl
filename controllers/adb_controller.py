@@ -9,7 +9,7 @@ class ADBController:
         self.adb_port = adb_port
         self.device_serial = f"127.0.0.1:{self.adb_port}"
 
-    def _run_adb_command(self, command: str, binary_output: bool = False) -> subprocess.CompletedProcess:
+    def _run_adb_command(self, command: str) -> subprocess.CompletedProcess:
         full_command = f'adb -s {self.device_serial} {command}'
         return subprocess.run(
             full_command,
@@ -20,7 +20,7 @@ class ADBController:
 
     def screenshot(self) -> Optional[np.ndarray]:
         try:
-            result = self._run_adb_command('exec-out screencap -p', binary_output=True)
+            result = self._run_adb_command('exec-out screencap -p')
             if result.returncode != 0 or not result.stdout:
                 raise RuntimeError(f"ADB screencap failed: {result.stderr.decode('utf-8', 'ignore')}")
             img_array = np.frombuffer(result.stdout, dtype=np.uint8)
@@ -29,7 +29,7 @@ class ADBController:
             if img is None:
                 print(f"Failed to decode screenshot. Image data may be corrupt or empty.")
                 return None
-            
+
             return img
         except Exception as e:
             print(f"Error capturing screenshot: {e}")
