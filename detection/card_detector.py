@@ -2,6 +2,12 @@ from ultralytics import YOLO
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 import cv2
+import sys
+from pathlib import Path
+
+# Import card information database
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from detection.card_info import get_card_category
 
 
 class CardDetector:
@@ -10,32 +16,33 @@ class CardDetector:
     Detects ally and enemy units with their positions and classes
     """
 
-    def __init__(self, model_path: str = "models/best.pt", confidence_threshold: float = 0.5, grid_system=None):
+    def __init__(self, model_path: str = "models/best.pt", confidence_threshold: float = 0.5,
+                 classifier_path: str = "models/card_classifier.pt", grid_system=None):
         """
-        Initialize the YOLO model for troop detection
+        Initialize the YOLO model for troop detection and card classifier
 
         Args:
-            model_path: Path to the trained YOLO weights file
+            model_path: Path to the trained YOLO weights file (detects WHERE + ally/enemy)
             confidence_threshold: Minimum confidence for detections (0-1)
+            classifier_path: Path to card classification model (identifies WHICH card)
             grid_system: GridSystem instance for converting pixels to grid coordinates
         """
         self.model = YOLO(model_path)
         self.confidence_threshold = confidence_threshold
         self.grid_system = grid_system
 
-        # Class names from your training
-        self.class_names = [
-            'ally_air',
-            'ally_building',
-            'ally_melee',
-            'ally_ranged',
-            'ally_tank',
-            'enemy_air',
-            'enemy_building',
-            'enemy_melee',
-            'enemy_ranged',
-            'enemy_tank'
-        ]
+        # Get class names directly from the loaded model
+        self.class_names = self.model.names
+        print(f"[CardDetector] Loaded detection model with {len(self.class_names)} classes: {self.class_names}")
+
+        # Load card classifier model
+        self.classifier = None
+        if classifier_path:
+            try:
+                self.classifier = YOLO(classifier_path)
+                print(f"[CardDetector] Loaded card classifier with {len(self.classifier.names)} card types")
+            except Exception as e:
+                print(f"[CardDetector] Warning: Could not load classifier ({e}). Will use detection model only.")
 
     def detect(self, screenshot: np.ndarray, verbose: bool = False) -> List[Dict]:
         """
@@ -68,7 +75,29 @@ class CardDetector:
                 # Get confidence and class
                 confidence = float(box.conf[0].cpu().numpy())
                 class_id = int(box.cls[0].cpu().numpy())
-                class_name = self.class_names[class_id]
+                class_name = self.class_names[class_id]  # 'ally' or 'enemy'
+
+                # Extract crop for card classification
+                x1_int, y1_int, x2_int, y2_int = int(x1), int(y1), int(x2), int(y2)
+                crop = screenshot[y1_int:y2_int, x1_int:x2_int]
+
+                # Classify card type if classifier is available
+                card_type = 'unknown'
+                card_confidence = 0.0
+                if self.classifier and crop.size > 0:
+                    try:
+                        classifier_results = self.classifier(crop, verbose=False)
+                        if len(classifier_results) > 0:
+                            probs = classifier_results[0].probs
+                            card_type_id = int(probs.top1)
+                            card_type = self.classifier.names[card_type_id]
+                            card_confidence = float(probs.top1conf)
+                    except Exception as e:
+                        if verbose:
+                            print(f"Warning: Classification failed for detection: {e}")
+
+                # Map card type to troop category (melee, ranged, tank, etc.)
+                troop_category = self._map_card_to_category(card_type)
 
                 # Calculate center point
                 center_x = int((x1 + x2) / 2)
@@ -81,8 +110,12 @@ class CardDetector:
                     grid_pos = (grid_row, grid_col)
 
                 detection = {
-                    'class_name': class_name,
+                    'class_name': f"{class_name}_{troop_category}",  # e.g., "enemy_tank"
+                    'team': class_name,  # 'ally' or 'enemy'
+                    'card_type': card_type,  # e.g., 'giant', 'knight'
+                    'troop_category': troop_category,  # e.g., 'tank', 'melee'
                     'confidence': confidence,
+                    'card_confidence': card_confidence,
                     'bbox': (int(x1), int(y1), int(x2), int(y2)),
                     'center': (center_x, center_y),
                     'grid': grid_pos
@@ -94,6 +127,19 @@ class CardDetector:
             self._print_detections(detections)
 
         return detections
+
+    def _map_card_to_category(self, card_type: str) -> str:
+        """
+        Map card name to troop category for threat calculation
+        Uses centralized card_info.py database
+
+        Args:
+            card_type: Card name (e.g., 'giant', 'archers')
+
+        Returns:
+            Category: 'melee', 'ranged', 'tank', 'air', or 'building'
+        """
+        return get_card_category(card_type)
 
     def _print_detections(self, detections: List[Dict]):
         """Print detection results in a readable format"""

@@ -8,9 +8,11 @@ class ADBController:
     def __init__(self, adb_port: int):
         self.adb_port = adb_port
         self.device_serial = f"127.0.0.1:{self.adb_port}"
+        # Use full path to adb for macOS
+        self.adb_path = '/opt/homebrew/bin/adb'
 
     def _run_adb_command(self, command: str) -> subprocess.CompletedProcess:
-        full_command = f'adb -s {self.device_serial} {command}'
+        full_command = f'{self.adb_path} -s {self.device_serial} {command}'
         return subprocess.run(
             full_command,
             shell=True,

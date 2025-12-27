@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 2
+names: ['ally', 'enemy']
+
+roboflow:
+  workspace: clash-royale-rl
+  project: clash-royale-xy2jw-lvgzn-w7bhp-z4lhi
+  version: 10
+  license: MIT
+  url: https://universe.roboflow.com/clash-royale-rl/clash-royale-xy2jw-lvgzn-w7bhp-z4lhi/dataset/10

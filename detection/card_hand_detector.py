@@ -1,37 +1,57 @@
 import cv2
 import numpy as np
+import os
 from typing import List, Optional, Dict
 from pathlib import Path
+
+# Import card information database
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from detection.card_info import CARD_TYPES, CARD_INFO, get_card_category
 
 
 class CardHandDetector:
     """
-    Detects cards in hand using template matching
+    Detects cards in hand using YOLOv8 classification with template matching fallback
     Works with fixed card positions at bottom of screen
     """
 
-    def __init__(self, template_dir: str = "detection/card_templates"):
+    def __init__(self, template_dir: str = "detection/card_templates",
+                 classifier_path: str = "models/card_hand_classifier.pt",
+                 use_yolo: bool = True):
         """
         Initialize card hand detector
 
         Args:
             template_dir: Directory containing card template images
+            classifier_path: Path to YOLOv8 classification model
+            use_yolo: If True, use YOLOv8 classifier; if False, use template matching
         """
         self.template_dir = Path(template_dir)
+        self.use_yolo = use_yolo
 
-        # Card type mappings for your deck
-        self.card_types = {
-            'tombstone': 'building',
-            'bomber': 'ranged',
-            'valkyrie': 'melee',
-            'goblins': 'melee',
-            'spear_goblins': 'ranged',
-            'cannon': 'building',
-            'giant': 'tank',
-            'skeletons': 'melee'
-        }
+        # Card type mappings loaded from card_info.py
+        # To add new cards, edit detection/card_info.py
+        self.card_types = CARD_TYPES
+        self.card_info = CARD_INFO  # Full card info for future features
 
-        # Load card templates
+        # Load YOLOv8 classifier if enabled
+        self.classifier = None
+        if self.use_yolo:
+            try:
+                from ultralytics import YOLO
+                if Path(classifier_path).exists():
+                    self.classifier = YOLO(classifier_path)
+                    print(f"Loaded YOLOv8 card hand classifier: {classifier_path}")
+                else:
+                    print(f"Warning: YOLOv8 model not found at {classifier_path}, falling back to template matching")
+                    self.use_yolo = False
+            except ImportError:
+                print("Warning: ultralytics not installed, falling back to template matching")
+                self.use_yolo = False
+
+        # Load card templates (for fallback or if YOLO disabled)
         self.templates = {}
         self._load_templates()
 
@@ -46,31 +66,80 @@ class CardHandDetector:
         ]
 
     def _load_templates(self):
-        """Load all card templates from the templates directory"""
+        """
+        Load all card templates from the templates directory
+        Supports multiple variants per card (e.g., cannon_1.png, cannon_2.png)
+        """
         for card_name in self.card_types.keys():
-            # Load normal (available) template
-            template_path = self.template_dir / f"{card_name}.png"
-            if template_path.exists():
+            # Find all variants for this card (e.g., cannon_1.png, cannon_2.png, etc.)
+            variants = self._get_template_variants(card_name)
+
+            if not variants:
+                print(f"Warning: No templates found for '{card_name}'")
+                continue
+
+            # Load all variants
+            for variant_file in variants:
+                template_path = self.template_dir / variant_file
                 template = cv2.imread(str(template_path))
                 if template is not None:
-                    self.templates[card_name] = template
+                    # Store with full variant name (e.g., "cannon_1" not just "cannon")
+                    variant_name = variant_file.replace('.png', '').replace('.jpg', '')
+
+                    # Check if it's a grayed variant
+                    if '_grayed' in variant_name:
+                        self.templates[variant_name] = template
+                    else:
+                        self.templates[variant_name] = template
                 else:
                     print(f"Warning: Failed to load template: {template_path}")
-            else:
-                print(f"Warning: Template not found: {template_path}")
 
-            # Load grayed out (unavailable) template if exists
-            grayed_path = self.template_dir / f"{card_name}_grayed.png"
-            if grayed_path.exists():
+            # Also load grayed out variants if they exist
+            grayed_variants = self._get_template_variants(f"{card_name}_grayed")
+            for grayed_file in grayed_variants:
+                grayed_path = self.template_dir / grayed_file
                 grayed_template = cv2.imread(str(grayed_path))
                 if grayed_template is not None:
-                    self.templates[f"{card_name}_grayed"] = grayed_template
+                    variant_name = grayed_file.replace('.png', '').replace('.jpg', '')
+                    self.templates[variant_name] = grayed_template
 
-        print(f"Loaded {len(self.templates)} card templates (including grayed variants)")
+        print(f"Loaded {len(self.templates)} card templates (including variants and grayed)")
+
+    def _get_template_variants(self, card_name: str) -> List[str]:
+        """
+        Get all template variants for a card (e.g., cannon_1.png, cannon_2.png)
+
+        Args:
+            card_name: Base card name (e.g., 'cannon')
+
+        Returns:
+            List of template filenames found
+        """
+        variants = []
+
+        # Find all files matching pattern: card_name_*.png or card_name.png
+        for file in os.listdir(self.template_dir):
+            if file.endswith('.png') or file.endswith('.jpg'):
+                # Remove extension
+                base = file.replace('.png', '').replace('.jpg', '')
+
+                # Check if it matches card_name or card_name_<number>
+                if base == card_name:
+                    variants.append(file)
+                elif base.startswith(card_name + '_'):
+                    # Check if suffix is a number (variant) or "grayed"
+                    suffix = base[len(card_name) + 1:]
+                    if suffix.isdigit() or suffix == 'grayed':
+                        variants.append(file)
+
+        # Sort to ensure consistent order (1, 2, 3, etc.)
+        variants.sort()
+
+        return variants
 
     def identify_card(self, card_img: np.ndarray, threshold: float = 0.7) -> Optional[Dict[str, any]]:
         """
-        Identify a single card image using template matching
+        Identify a single card image using YOLOv8 classifier or template matching
 
         Args:
             card_img: Cropped card image from screenshot
@@ -82,6 +151,33 @@ class CardHandDetector:
         if card_img is None or card_img.size == 0:
             return None
 
+        # Try YOLOv8 classification first
+        if self.use_yolo and self.classifier is not None:
+            try:
+                results = self.classifier(card_img, verbose=False)
+                probs = results[0].probs
+
+                card_name = self.classifier.names[int(probs.top1)]
+                confidence = float(probs.top1conf)
+
+                if confidence >= threshold:
+                    # Detect if card is available by checking color saturation
+                    # Grayed cards have low saturation
+                    hsv = cv2.cvtColor(card_img, cv2.COLOR_BGR2HSV)
+                    avg_saturation = np.mean(hsv[:, :, 1])
+                    is_available = avg_saturation > 50  # Threshold for grayed detection
+
+                    return {
+                        'card_name': card_name,
+                        'card_type': self.card_types.get(card_name, 'unknown'),
+                        'confidence': confidence,
+                        'available': is_available
+                    }
+            except Exception as e:
+                print(f"YOLOv8 classification failed: {e}, falling back to template matching")
+                # Fall through to template matching
+
+        # Fallback to template matching
         best_match = None
         best_score = 0
         best_card_name = None
@@ -103,12 +199,17 @@ class CardHandDetector:
 
         if best_score >= threshold and best_card_name:
             # Check if it's a grayed out variant
-            is_available = not best_card_name.endswith('_grayed')
-            actual_card_name = best_card_name.replace('_grayed', '') if not is_available else best_card_name
+            is_available = not '_grayed' in best_card_name
+
+            # Extract actual card name (remove _grayed and _<number> suffixes)
+            actual_card_name = best_card_name.replace('_grayed', '')
+            # Remove variant number (e.g., cannon_1 -> cannon)
+            if '_' in actual_card_name and actual_card_name.split('_')[-1].isdigit():
+                actual_card_name = '_'.join(actual_card_name.split('_')[:-1])
 
             return {
                 'card_name': actual_card_name,
-                'card_type': self.card_types[actual_card_name],
+                'card_type': self.card_types.get(actual_card_name, 'unknown'),
                 'confidence': best_score,
                 'available': is_available
             }
